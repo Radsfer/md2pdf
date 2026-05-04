@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "md2pdf"
+version = "1.0.0"
+description = "Converte arquivos Markdown (.md) para PDF"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "Radsfer"},
+]
+dependencies = [
+    "markdown",
+    "xhtml2pdf",
+    "pypdf",
+]
+
+[project.scripts]
+md2pdf = "md2pdf.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
