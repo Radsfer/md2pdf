@@ -8,6 +8,14 @@ Converte arquivos Markdown (`.md`) para PDF via linha de comando.
 pip install git+https://github.com/Radsfer/md2pdf.git
 ```
 
+> **Nota para Python da Microsoft Store:** o comando `md2pdf` pode não ser reconhecido
+> porque a pasta `Scripts` não está no PATH. Adicione-a manualmente:
+> ```powershell
+> # PowerShell (admin)
+> [Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";$env:LOCALAPPDATA\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\Scripts", "User")
+> ```
+> Após fechar e reabrir o terminal, o comando estará disponível.
+
 Ou instale as dependências manualmente:
 
 ```bash
