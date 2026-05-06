@@ -170,7 +170,7 @@ def _render_mermaid(code, png_path):
             "-i", "-",
         ],
         input=code,
-        text=True,
+        encoding="utf-8",
         capture_output=True,
         timeout=30,
     )
