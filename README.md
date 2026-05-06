@@ -44,11 +44,28 @@ md2pdf merge doc1.pdf doc2.pdf doc3.pdf -o consolidado.pdf
 md2pdf
 ```
 
+## Diagramas Mermaid
+
+Blocos ` ```mermaid ` ` sao automaticamente renderizados como imagens no PDF.
+
+Na primeira conversao com diagramas, o **mermaid-cli e instalado
+automaticamente** (requer Node.js/npm no PATH).
+
+Para instalar manualmente:
+
+```bash
+npm install -g @mermaid-js/mermaid-cli
+```
+
+Caso o Node.js nao esteja disponivel, os blocos Mermaid serao mantidos
+como codigo-fonte no PDF.
+
 ## Dependências
 
 - [markdown](https://pypi.org/project/markdown/)
 - [xhtml2pdf](https://pypi.org/project/xhtml2pdf/)
 - [pypdf](https://pypi.org/project/pypdf/)
+- [Node.js](https://nodejs.org/) + [mermaid-cli](https://github.com/mermaid-js/mermaid-cli) (opcional, para diagramas Mermaid)
 
 ## Licença
 

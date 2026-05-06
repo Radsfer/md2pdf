@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "md2pdf"
-version = "1.0.0"
+version = "1.1.0"
 description = "Converte arquivos Markdown (.md) para PDF"
 readme = "README.md"
 license = {text = "MIT"}
