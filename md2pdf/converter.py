@@ -58,6 +58,11 @@ CSS_BASICO = """
         background-color: #f2f2f2;
         font-weight: bold;
     }
+    td code {
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: break-word;
+    }
     code {
         font-family: Consolas, monospace;
         background-color: #f4f4f4;
@@ -70,6 +75,14 @@ CSS_BASICO = """
         border-left: 3px solid #0078d4;
         overflow-x: auto;
         font-size: 9pt;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        -pdf-word-wrap: break-word;
+    }
+    pre code {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        -pdf-word-wrap: break-word;
     }
     blockquote {
         border-left: 4px solid #ccc;
