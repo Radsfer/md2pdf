@@ -400,7 +400,7 @@ def _replace_svg_images(html, temp_dir, base_dir):
         ok = False
         # Tenta renderizar com browser headless (melhor qualidade)
         if tem_browser:
-            ok = _render_svg_browser(browser, svg_path, png_path, scale=2)
+            ok = _render_svg_browser(browser, svg_path, png_path, scale=1)
 
         # Fallback para svglib + renderPM
         if not ok and _HAS_SVGLIB:
@@ -421,7 +421,11 @@ def _replace_svg_images(html, temp_dir, base_dir):
             continue
 
         png_url = png_path.replace(os.sep, "/")
-        new_tag = f'<img{match.group(1)}src="{png_url}"{match.group(3)}>'
+        new_tag = (
+            f'<div style="text-align:center;margin:1.5em 0;">'
+            f'<img{match.group(1)}src="{png_url}"{match.group(3)}>'
+            f'</div>'
+        )
         substituicoes.append((match.start(), match.end(), new_tag))
 
     for start, end, replacement in sorted(
