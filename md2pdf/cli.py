@@ -15,7 +15,7 @@ def main():
     parser.add_argument(
         "-v", "--version",
         action="version",
-        version="md2pdf 1.2.1",
+        version="md2pdf 2.1.0",
     )
 
     # md2pdf export <arquivo.md>
