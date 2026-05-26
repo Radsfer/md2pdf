@@ -4,12 +4,22 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
+import warnings
 from glob import glob
+from io import StringIO
 
 import markdown
 from xhtml2pdf import pisa
 from pypdf import PdfWriter
+
+try:
+    from svglib.svglib import svg2rlg
+    from reportlab.graphics import renderPM
+    _HAS_SVGLIB = True
+except Exception:
+    _HAS_SVGLIB = False
 
 CSS_BASICO = """
 <style>
@@ -60,8 +70,9 @@ CSS_BASICO = """
     }
     td code {
         white-space: normal;
-        word-break: break-word;
+        word-break: break-all;
         overflow-wrap: break-word;
+        -pdf-word-wrap: break-word;
     }
     code {
         font-family: Consolas, monospace;
@@ -78,6 +89,7 @@ CSS_BASICO = """
         white-space: pre-wrap;
         word-wrap: break-word;
         -pdf-word-wrap: break-word;
+        word-break: break-all;
     }
     pre code {
         white-space: pre-wrap;
@@ -265,6 +277,142 @@ def _replace_mermaid_blocks(html, temp_dir):
     return html
 
 
+def _replace_svg_images(html, temp_dir, base_dir):
+    """Substitui <img src=\"... .svg\"> por imagens PNG.
+
+    O xhtml2pdf nao renderiza SVGs complexos. Esta funcao converte
+    arquivos SVG referenciados em <img> para PNG usando svglib,
+    gerando arquivos temporarios e atualizando o HTML.
+
+    Args:
+        html: HTML pos-markdown.
+        temp_dir: Diretorio temporario para armazenar os PNGs gerados.
+        base_dir: Diretorio base para resolver caminhos relativos.
+
+    Returns:
+        HTML com atributos src de imagens SVG atualizados para PNG.
+    """
+    if not _HAS_SVGLIB:
+        return html
+
+    padrao = re.compile(
+        r'<img([^>]+?)src=["\']([^"\']+\.svg)["\']([^>]*?)>',
+        re.IGNORECASE,
+    )
+
+    substituicoes = []
+
+    for idx, match in enumerate(padrao.finditer(html)):
+        svg_src = match.group(2)
+        # Resolver caminho absoluto
+        if os.path.isabs(svg_src):
+            svg_path = svg_src
+        else:
+            svg_path = os.path.join(base_dir, svg_src)
+
+        if not os.path.isfile(svg_path):
+            continue
+
+        png_name = f"svg_{idx}.png"
+        png_path = os.path.join(temp_dir, png_name)
+
+        try:
+            # Silencia warnings do parser reportlab durante conversao
+            old_stderr = sys.stderr
+            sys.stderr = StringIO()
+            try:
+                drawing = svg2rlg(svg_path)
+                if drawing is None:
+                    continue
+                renderPM.drawToFile(drawing, png_path, fmt="PNG")
+            finally:
+                sys.stderr = old_stderr
+        except Exception:
+            continue
+
+        png_url = png_path.replace(os.sep, "/")
+        new_tag = f'<img{match.group(1)}src="{png_url}"{match.group(3)}>'
+        substituicoes.append((match.start(), match.end(), new_tag))
+
+    for start, end, replacement in sorted(
+        substituicoes, key=lambda x: x[0], reverse=True
+    ):
+        html = html[:start] + replacement + html[end:]
+
+    return html
+
+
+def _ajustar_code_em_tabelas(html, max_len=25):
+    """Insere <br/> dentro de <code> longos em <td> para forcar quebra,
+    pois o xhtml2pdf nao respeita word-break em <code> inline."""
+    def process_td(match):
+        td_inner = match.group(1)
+
+        def quebrar_code(code_match):
+            conteudo = code_match.group(1)
+            if len(conteudo) <= max_len:
+                return code_match.group(0)
+            partes = [conteudo[i:i+max_len] for i in range(0, len(conteudo), max_len)]
+            return '<code>' + '<br/>'.join(partes) + '</code>'
+
+        new_inner = re.sub(r'<code>(.+?)</code>', quebrar_code, td_inner, flags=re.DOTALL)
+        return '<td>' + new_inner + '</td>'
+
+    return re.sub(r'<td>(.*?)</td>', process_td, html, flags=re.DOTALL)
+
+
+def _ajustar_pre_blocks(html, max_len=80):
+    """Insere <br/> em linhas longas dentro de <pre><code> para forcar quebra,
+    pois o xhtml2pdf nao respeita word-wrap em blocos pre."""
+    def process_pre_code(match):
+        content = match.group(1)
+        lines = content.split('\n')
+        new_lines = []
+        for line in lines:
+            if len(line) > max_len:
+                parts = [line[i:i+max_len] for i in range(0, len(line), max_len)]
+                new_lines.append('<br/>'.join(parts))
+            else:
+                new_lines.append(line)
+        return '<pre><code>' + '\n'.join(new_lines) + '</code></pre>'
+
+    return re.sub(r'<pre><code[^>]*>(.*?)</code></pre>', process_pre_code, html, flags=re.DOTALL)
+
+
+def _ajustar_code_inline(html, max_len=50):
+    """Insere <br/> dentro de <code> inline longos (fora de <td> e <pre>)
+    para forcar quebra na pagina."""
+    placeholders_pre = []
+    placeholders_td = []
+
+    def save_pre(m):
+        placeholders_pre.append(m.group(0))
+        return '__PRE_{}__'.format(len(placeholders_pre) - 1)
+
+    def save_td(m):
+        placeholders_td.append(m.group(0))
+        return '__TD_{}__'.format(len(placeholders_td) - 1)
+
+    html_temp = re.sub(r'<pre>.*?</pre>', save_pre, html, flags=re.DOTALL)
+    html_temp = re.sub(r'<td>.*?</td>', save_td, html_temp, flags=re.DOTALL)
+
+    def quebrar_code(code_match):
+        conteudo = code_match.group(1)
+        if len(conteudo) <= max_len:
+            return code_match.group(0)
+        partes = [conteudo[i:i+max_len] for i in range(0, len(conteudo), max_len)]
+        return '<code>' + '<br/>'.join(partes) + '</code>'
+
+    html_temp = re.sub(r'<code>(.*?)</code>', quebrar_code, html_temp, flags=re.DOTALL)
+
+    for i, val in enumerate(placeholders_td):
+        html_temp = html_temp.replace('__TD_{}__'.format(i), val)
+    for i, val in enumerate(placeholders_pre):
+        html_temp = html_temp.replace('__PRE_{}__'.format(i), val)
+
+    return html_temp
+
+
 def md_para_pdf(caminho_md, caminho_pdf):
     """Converte um unico arquivo Markdown para PDF."""
     with open(caminho_md, "r", encoding="utf-8") as f:
@@ -277,7 +425,12 @@ def md_para_pdf(caminho_md, caminho_pdf):
 
     temp_dir = tempfile.TemporaryDirectory()
     try:
+        base_dir = os.path.dirname(os.path.abspath(caminho_md))
         html_body = _replace_mermaid_blocks(html_body, temp_dir.name)
+        html_body = _replace_svg_images(html_body, temp_dir.name, base_dir)
+        html_body = _ajustar_pre_blocks(html_body)
+        html_body = _ajustar_code_em_tabelas(html_body)
+        html_body = _ajustar_code_inline(html_body)
 
         html_completo = f"""<!DOCTYPE html>
 <html>
@@ -292,7 +445,9 @@ def md_para_pdf(caminho_md, caminho_pdf):
 </html>"""
 
         with open(caminho_pdf, "wb") as out:
-            result = pisa.CreatePDF(html_completo, dest=out)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                result = pisa.CreatePDF(html_completo, dest=out)
     finally:
         temp_dir.cleanup()
 
