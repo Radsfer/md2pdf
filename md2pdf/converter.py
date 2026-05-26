@@ -6,9 +6,11 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import warnings
 from glob import glob
 from io import StringIO
+from pathlib import Path
 
 import markdown
 from xhtml2pdf import pisa
@@ -277,12 +279,91 @@ def _replace_mermaid_blocks(html, temp_dir):
     return html
 
 
+def _find_chrome_or_edge():
+    """Tenta localizar chrome.exe ou msedge.exe no Windows."""
+    candidatos = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    ]
+    for caminho in candidatos:
+        if os.path.isfile(caminho):
+            return caminho
+    return None
+
+
+def _render_svg_browser(browser_path, svg_path, png_path, scale=2):
+    """Renderiza SVG para PNG usando Chrome/Edge headless.
+
+    Args:
+        browser_path: Caminho do executavel chrome/msedge.
+        svg_path: Caminho do arquivo SVG de entrada.
+        png_path: Caminho do arquivo PNG de saida.
+        scale: Fator de escala para alta resolucao (default 2x).
+
+    Returns:
+        True se o PNG foi gerado com sucesso.
+    """
+    # Extrair dimensoes do SVG via svglib (apenas para window-size)
+    try:
+        old_stderr = sys.stderr
+        sys.stderr = StringIO()
+        try:
+            drawing = svg2rlg(svg_path)
+            if drawing is None:
+                return False
+            base_w = int(drawing.width)
+            base_h = int(drawing.height)
+        finally:
+            sys.stderr = old_stderr
+    except Exception:
+        return False
+
+    w = base_w * scale
+    h = base_h * scale
+
+    svg_url = Path(svg_path).as_uri()
+
+    # Garante que o PNG de saida nao exista previamente
+    if os.path.isfile(png_path):
+        os.remove(png_path)
+
+    cmd = [
+        browser_path,
+        "--headless",
+        "--disable-gpu",
+        "--hide-scrollbars",
+        "--screenshot=" + os.path.abspath(png_path),
+        "--window-size={},{}".format(w, h),
+        svg_url,
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except Exception:
+        return False
+
+    # O Chrome/Edge headless demora um pouco para escrever o arquivo
+    for _ in range(10):
+        if os.path.isfile(png_path) and os.path.getsize(png_path) > 0:
+            return True
+        time.sleep(0.3)
+
+    return False
+
+
 def _replace_svg_images(html, temp_dir, base_dir):
     """Substitui <img src=\"... .svg\"> por imagens PNG.
 
     O xhtml2pdf nao renderiza SVGs complexos. Esta funcao converte
-    arquivos SVG referenciados em <img> para PNG usando svglib,
-    gerando arquivos temporarios e atualizando o HTML.
+    arquivos SVG referenciados em <img> para PNG, preferindo
+    Chrome/Edge headless (alta qualidade) e fallback para svglib.
 
     Args:
         html: HTML pos-markdown.
@@ -292,8 +373,8 @@ def _replace_svg_images(html, temp_dir, base_dir):
     Returns:
         HTML com atributos src de imagens SVG atualizados para PNG.
     """
-    if not _HAS_SVGLIB:
-        return html
+    browser = _find_chrome_or_edge()
+    tem_browser = browser is not None
 
     padrao = re.compile(
         r'<img([^>]+?)src=["\']([^"\']+\.svg)["\']([^>]*?)>',
@@ -316,18 +397,27 @@ def _replace_svg_images(html, temp_dir, base_dir):
         png_name = f"svg_{idx}.png"
         png_path = os.path.join(temp_dir, png_name)
 
-        try:
-            # Silencia warnings do parser reportlab durante conversao
-            old_stderr = sys.stderr
-            sys.stderr = StringIO()
+        ok = False
+        # Tenta renderizar com browser headless (melhor qualidade)
+        if tem_browser:
+            ok = _render_svg_browser(browser, svg_path, png_path, scale=2)
+
+        # Fallback para svglib + renderPM
+        if not ok and _HAS_SVGLIB:
             try:
-                drawing = svg2rlg(svg_path)
-                if drawing is None:
-                    continue
-                renderPM.drawToFile(drawing, png_path, fmt="PNG")
-            finally:
-                sys.stderr = old_stderr
-        except Exception:
+                old_stderr = sys.stderr
+                sys.stderr = StringIO()
+                try:
+                    drawing = svg2rlg(svg_path)
+                    if drawing is not None:
+                        renderPM.drawToFile(drawing, png_path, fmt="PNG")
+                        ok = True
+                finally:
+                    sys.stderr = old_stderr
+            except Exception:
+                ok = False
+
+        if not ok:
             continue
 
         png_url = png_path.replace(os.sep, "/")
